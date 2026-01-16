@@ -12,23 +12,19 @@ int main() {
   // TODO: Uncomment the code below to pass the first stage
   while(true){
     std::cout << "$ ";
-    std::string input;
-    std::getline(std::cin, input);
-    std::stringstream ss(input);
-
     std::string command;
-    ss>>command;
-    
+    std::getline(std::cin, command);
+  
     if (command == "exit") break;
-    else if(command == "echo") {
-      // std:: string args = ss.str();
-      // std::cout << args << "\n";
-      while(ss){
-        std::string args;
-        ss >> args;
-        std::cout << args << " ";
-      }
-      std::cout << "\n";
+    else if(command.substr(0,4) == "echo") {
+      std::cout << command.substr(5) << '\n';
+    }else if(command.substr(0,4) == "type") {
+      std::string args = command.substr(5);
+      if(args == "echo" || args == "exit" || args == "type"){
+        std::cout << args << " is a shell builtin\n";
+      }else{
+        std:: cout << args <<": not found\n";
+      } 
     }else {
       std:: cout << command <<": command not found\n";
     }
