@@ -68,8 +68,20 @@ int main() {
 
         if(!found) std:: cout << args <<": not found\n";
       } 
-    }else {
-      std:: cout << command <<": command not found\n";
+    } else {
+      std::stringstream ss(command);
+      std::string program;
+      ss >> program; 
+      bool found = false;
+      for(auto dir: directories){
+        fs::path filePath = dir / program;
+        if(is_runnable(filePath.string())){
+          std::system(command.c_str());
+          found = true;
+        }
+        if(found)break;
+      }
+      if(!found) std:: cout << program <<": not found\n";
     }
 
   }
