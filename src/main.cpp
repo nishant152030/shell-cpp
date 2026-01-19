@@ -38,8 +38,11 @@ int main() {
   // TODO: Uncomment the code below to pass the first stage
 
   const char* raw_env = std::getenv("PATH");
+  const char* raw_home_env = std::getenv("HOME");
 
   std::string path_env(raw_env);
+  fs::path home_env(raw_home_env);
+
   std::vector<fs::path> directories;
   
   std::stringstream ss(path_env);
@@ -91,6 +94,7 @@ int main() {
     } 
     else if(command.substr(0,2) == "cd") {
       fs::path new_dir = command.substr(3);
+      new_dir = (new_dir.string() == "~") ? home_env : new_dir;
       try {
         fs::current_path(new_dir);
       } catch (const fs::filesystem_error& e){
