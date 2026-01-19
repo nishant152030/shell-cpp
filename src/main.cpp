@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
   const char ENV_SEP = ':';
 #endif
 
-std::vector<std::string> builtins = {"pwd","exit","type","echo"};
+std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
 
 bool is_runnable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
@@ -50,23 +50,31 @@ int main() {
     }
   }
 
-
   while(true){
     std::cout << "$ ";
     std::string command;
     std::getline(std::cin, command);
     
     if (command == "exit") break;
-    if(command == "pwd"){
+
+    if(command == "pwd")
+    {
       fs::path cwd = fs::current_path();
       std::cout << cwd.string() << '\n';
-    } else if(command.substr(0,4) == "echo") {
+    } 
+    else if(command.substr(0,4) == "echo") 
+    {
       std::cout << command.substr(5) << '\n';
-    } else if(command.substr(0,4) == "type") {
+    } 
+    else if(command.substr(0,4) == "type") 
+    {
       std::string args = command.substr(5);
-      if(checkBuiltin(args)){
+      if(checkBuiltin(args))
+      {
         std::cout << args << " is a shell builtin\n";
-      }else{
+      }
+      else
+      {
         bool found = false;
         
         for(auto dir: directories){
@@ -75,12 +83,22 @@ int main() {
             std::cout<< args << " is " << filePath.make_preferred().string() << '\n';
             found = true;
           }
-          if(found)break;
+          if(found) break;
         }
 
         if(!found) std:: cout << args <<": not found\n";
       } 
-    } else {
+    } 
+    else if(command.substr(0,2) == "cd") {
+      fs::path new_dir = command.substr(3);
+      try {
+        fs::current_path(new_dir);
+      } catch (const fs::filesystem_error& e){
+        std::cerr << "cd: " << new_dir.string() << ": " << e.code().message() << '\n';
+      }
+    }
+    else 
+    {
       std::stringstream ss(command);
       std::string program;
       ss >> program; 
