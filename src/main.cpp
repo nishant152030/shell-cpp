@@ -15,11 +15,19 @@ namespace fs = std::filesystem;
   const char ENV_SEP = ':';
 #endif
 
+std::vector<std::string> builtins = {"pwd","exit","type","echo"};
 
 bool is_runnable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
 
   return (access(path.c_str(), X_OK) == 0);
+}
+
+bool checkBuiltin(const std::string& command){
+  for(auto &s: builtins) {
+    if(s == command)return true;
+  }
+  return false;
 }
 
 int main() {
@@ -42,17 +50,21 @@ int main() {
     }
   }
 
+
   while(true){
     std::cout << "$ ";
     std::string command;
     std::getline(std::cin, command);
-  
+    
     if (command == "exit") break;
-    else if(command.substr(0,4) == "echo") {
+    if(command == "pwd"){
+      fs::path cwd = fs::current_path();
+      std::cout << cwd.string() << '\n';
+    } else if(command.substr(0,4) == "echo") {
       std::cout << command.substr(5) << '\n';
-    }else if(command.substr(0,4) == "type") {
+    } else if(command.substr(0,4) == "type") {
       std::string args = command.substr(5);
-      if(args == "echo" || args == "exit" || args == "type"){
+      if(checkBuiltin(args)){
         std::cout << args << " is a shell builtin\n";
       }else{
         bool found = false;
