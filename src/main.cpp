@@ -5,7 +5,8 @@
 #include <vector>
 #include <unistd.h>
 #include <filesystem>
-
+#include <regex>
+// #include <boost/program_options/parser.hpp>
 namespace fs = std::filesystem;
 // using namespace std;
 
@@ -28,6 +29,56 @@ bool checkBuiltin(const std::string& command){
     if(s == command)return true;
   }
   return false;
+}
+
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command){
+  std::vector<std::string> args;
+  std::string program;
+  std::string current;
+
+  bool inQuotes = false;
+  char quoteChar = '\0';
+  bool escaped = false;
+
+  for(char c: command){
+    if(escaped){
+      current += c;
+      escaped = false;
+      continue;
+    }
+
+    if(c == '\\'){
+      escaped = true;
+      continue;
+    }
+
+    if(inQuotes){
+      if( c == quoteChar || c == '\'' || c == '\"'){
+        inQuotes = false;
+      } else {
+        current += c;
+      }
+    } else {
+      if( c == '\'' || c == '\"'){
+        inQuotes = true;
+      } else if( std::isspace(c)){
+        if(!current.empty()) {
+          if(program.empty()) program = current;
+          else args.push_back(current);
+          current.erase();
+        }
+      } else {
+        current += c;
+      }
+    }
+  }
+
+  if(!current.empty()) {
+    if(program.empty()) program = current;
+    else args.push_back(current);
+    current.erase();
+  }
+  return std::make_pair(program,args);
 }
 
 int main() {
@@ -57,55 +108,62 @@ int main() {
     std::cout << "$ ";
     std::string command;
     std::getline(std::cin, command);
-    
-    if (command == "exit") break;
+    std::stringstream ss(command);
 
-    if(command == "pwd")
+    auto [program,args] = getCommandArgs(command);
+
+    // std::string program = commandAndargs[0];
+    
+    if (program == "exit") break;
+
+    if(program == "pwd")
     {
       fs::path cwd = fs::current_path();
       std::cout << cwd.string() << '\n';
     } 
-    else if(command.substr(0,4) == "echo") 
+    else if(program == "echo") 
     {
-      std::cout << command.substr(5) << '\n';
-    } 
-    else if(command.substr(0,4) == "type") 
-    {
-      std::string args = command.substr(5);
-      if(checkBuiltin(args))
-      {
-        std::cout << args << " is a shell builtin\n";
+      for(size_t i=0; i<args.size() ; i++){
+        std::cout << args[i] << ((i+1 != args.size()) ? ' ':'\n');
       }
-      else
-      {
-        bool found = false;
-        
-        for(auto dir: directories){
-          fs::path filePath = dir / args;
-          if(is_runnable(filePath.string())){
-            std::cout<< args << " is " << filePath.make_preferred().string() << '\n';
-            found = true;
-          }
-          if(found) break;
-        }
-
-        if(!found) std:: cout << args <<": not found\n";
-      } 
     } 
-    else if(command.substr(0,2) == "cd") {
-      fs::path new_dir = command.substr(3);
-      new_dir = (new_dir.string() == "~") ? home_env : new_dir;
-      try {
-        fs::current_path(new_dir);
-      } catch (const fs::filesystem_error& e){
-        std::cerr << "cd: " << new_dir.string() << ": " << e.code().message() << '\n';
+    else if(program == "type") 
+    {
+      for(auto &arg: args){
+        if(checkBuiltin(arg))
+        {
+          std::cout << arg << " is a shell builtin\n";
+        }
+        else
+        {
+          bool found = false;
+
+          for(auto dir: directories){
+            fs::path filePath = dir / arg;
+            if(is_runnable(filePath.string())){
+              std::cout<< arg << " is " << filePath.make_preferred().string() << '\n';
+              found = true;
+            }
+            if(found) break;
+          }
+
+          if(!found) std:: cout << arg <<": not found\n";
+        } 
+      }
+    } 
+    else if(program == "cd") {
+      for(auto &new_dir: args){
+        new_dir = (new_dir == "~") ? home_env.string() : new_dir;
+        try {
+          fs::current_path(new_dir);
+        } catch (const fs::filesystem_error& e){
+          std::cerr << "cd: " << new_dir << ": " << e.code().message() << '\n';
+        }
       }
     }
     else 
     {
-      std::stringstream ss(command);
-      std::string program;
-      ss >> program; 
+      // std::stringstream ss(command);
       bool found = false;
       for(auto dir: directories){
         fs::path filePath = dir / program;
@@ -117,6 +175,5 @@ int main() {
       }
       if(!found) std:: cout << program <<": not found\n";
     }
-
   }
 }
