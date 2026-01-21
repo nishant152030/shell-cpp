@@ -47,12 +47,12 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       escaped = false;
       continue;
     }
-
-    if(c == '\\'){
+    
+    if(c == '\\' && !inQuotes){
       escaped = true;
       continue;
     }
-
+    
     if(inQuotes){
       if( c == quoteChar ){
         inQuotes = false;
