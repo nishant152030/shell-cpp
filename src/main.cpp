@@ -37,7 +37,8 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   std::string current;
 
   bool inQuotes = false;
-  char quoteChar = '\0';
+  char nullChar = '\0';
+  char quoteChar = nullChar;
   bool escaped = false;
 
   for(char c: command){
@@ -53,14 +54,16 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
     }
 
     if(inQuotes){
-      if( c == quoteChar || c == '\'' || c == '\"'){
+      if( c == quoteChar ){
         inQuotes = false;
+        c = nullChar;
       } else {
         current += c;
       }
     } else {
       if( c == '\'' || c == '\"'){
         inQuotes = true;
+        quoteChar = c;
       } else if( std::isspace(c)){
         if(!current.empty()) {
           if(program.empty()) program = current;
