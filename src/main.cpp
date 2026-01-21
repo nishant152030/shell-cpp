@@ -48,7 +48,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       continue;
     }
     
-    if(c == '\\' && !inQuotes){
+    if(c == '\\' && quoteChar != '\''){
       escaped = true;
       continue;
     }
