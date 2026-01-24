@@ -11,17 +11,23 @@ namespace fs = std::filesystem;
 // using namespace std;
 
 #ifdef _WIN32
-  const char ENV_SEP = ';';
+#include <windows.h>
+  const char PATH_SEP = ';';
 #else 
-  const char ENV_SEP = ':';
+  #include <sys/types.h>
+  #include <sys/wait.h>
+  const char PATH_SEP = ':';
 #endif
 
 std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
 
-bool is_runnable(const std::string& path){
+bool isExecutable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
 
-  return (access(path.c_str(), X_OK) == 0);
+  auto perms = std::filesystem::status(path).permissions();
+  return ((perms & std::filesystem::perms::owner_exec) == std::filesystem::perms::owner_exec) ||
+         ((perms & std::filesystem::perms::group_exec) == std::filesystem::perms::group_exec) ||
+         ((perms & std::filesystem::perms::others_exec) == std::filesystem::perms::others_exec);
 }
 
 bool checkBuiltin(const std::string& command){
@@ -36,35 +42,47 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   std::string program;
   std::string current;
 
-  bool inQuotes = false;
-  char nullChar = '\0';
-  char quoteChar = nullChar;
+  char quoteChar = '\0';  // '\0' means not in quotes, '"' or '\'' means in that type of quote
   bool escaped = false;
 
-  for(char c: command){
+  for(size_t i = 0; i < command.size() ; i++){
+    char c = command[i];
     if(escaped){
       current += c;
       escaped = false;
       continue;
     }
     
-    if(c == '\\' && quoteChar != '\''){
-      escaped = true;
+    // Backslash escaping works:
+    // - Outside quotes: escapes any character
+    // - Inside double quotes: escapes any character
+    // - Inside single quotes: backslash has no special meaning
+    if(c == '\\'){
+      if(quoteChar == '\''){
+        current += c;
+      }else if(quoteChar == '\"') {
+        char next_char = (i+1 == command.size()) ? '\0' : command[i+1];
+        if(next_char == '\"' || next_char == '$' || next_char == '\\' || next_char == '\n' || next_char == '`') {
+          escaped = true;
+        }else {
+          current += c;
+        }
+      }else escaped = true;
       continue;
     }
     
-    if(inQuotes){
-      if( c == quoteChar ){
-        inQuotes = false;
-        c = nullChar;
+    // If in quotes, only the matching quote char can end the quotes
+    if(quoteChar != '\0'){
+      if(c == quoteChar){
+        quoteChar = '\0';  // End quotes
       } else {
         current += c;
       }
     } else {
-      if( c == '\'' || c == '\"'){
-        inQuotes = true;
-        quoteChar = c;
-      } else if( std::isspace(c)){
+      // Not in quotes
+      if(c == '\'' || c == '\"'){
+        quoteChar = c;  // Start quotes
+      } else if(std::isspace(c)){
         if(!current.empty()) {
           if(program.empty()) program = current;
           else args.push_back(current);
@@ -84,6 +102,54 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   return std::make_pair(program,args);
 }
 
+bool external_command_run(const std::string &program, std::vector<std::string> &args, std::vector<fs::path> &dirs){
+
+  for(auto &dir: dirs){
+    fs::path full_path = dir / program; 
+    if(!isExecutable(full_path.string())) continue;;
+  
+    #ifdef _WIN32
+      std::string cmd = "\"" + full_path.string() + "\"";\
+      for(const auto &a: args) cmd += "\"" + a + "\"";
+  
+      STARTUPINFOA si{};
+      PROCESS_INFORMATION pi{};
+      si.cb = sizeof(si);
+  
+      if (!CreateProcessA(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) continue;
+  
+      CloseHandle(pi.hThread);
+      CloseHandle(pi.hProcess);
+  
+      return true;
+    #else
+      pid_t pid = fork();
+      if(pid == 0){
+        std::vector<char*> argv;
+        argv.push_back(const_cast<char*>(program.c_str()));
+        for(auto &arg: args) {
+          argv.push_back(const_cast<char*>(arg.c_str()));
+        }
+        argv.push_back(nullptr);
+        
+        execvp(full_path.c_str(), argv.data());
+        perror("execv failed");
+        exit(1);
+  
+      } else if ( pid > 0){
+        int status;
+        waitpid(pid, &status, 0);
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 127) continue;
+        return true;
+      } else {
+        perror("fork failed");
+      }
+    #endif 
+
+  }
+  return false;
+}
+
 int main() {
   // Flush after every std::cout / std:cerr
   std::cout << std::unitbuf;
@@ -101,7 +167,7 @@ int main() {
   
   std::stringstream ss(path_env);
   std::string item;
-  while(std::getline(ss,item,ENV_SEP)){
+  while(std::getline(ss,item,PATH_SEP)){
     if(!item.empty()){
       directories.push_back(fs::path(item));
     }
@@ -115,8 +181,6 @@ int main() {
 
     auto [program,args] = getCommandArgs(command);
 
-    // std::string program = commandAndargs[0];
-    
     if (program == "exit") break;
 
     if(program == "pwd")
@@ -143,7 +207,7 @@ int main() {
 
           for(auto dir: directories){
             fs::path filePath = dir / arg;
-            if(is_runnable(filePath.string())){
+            if(isExecutable(filePath.string())){
               std::cout<< arg << " is " << filePath.make_preferred().string() << '\n';
               found = true;
             }
@@ -166,17 +230,9 @@ int main() {
     }
     else 
     {
-      // std::stringstream ss(command);
-      bool found = false;
-      for(auto dir: directories){
-        fs::path filePath = dir / program;
-        if(is_runnable(filePath.string())){
-          std::system(command.c_str());
-          found = true;
-        }
-        if(found)break;
-      }
-      if(!found) std:: cout << program <<": not found\n";
+      //handle not builtin command
+
+      if(!external_command_run(program,args,directories)) std:: cout << program << ": not found\n";
     }
   }
 }
