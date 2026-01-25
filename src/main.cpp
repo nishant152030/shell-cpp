@@ -39,7 +39,7 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &out_redirect,bool &err_redirect, bool &app_redirect, bool err_app_redirect){
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &out_redirect,bool &err_redirect, bool &app_redirect, bool &err_app_redirect){
   std::vector<std::string> args;
   std::string program;
   std::string current;
