@@ -39,7 +39,7 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &redirection){
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &should_out_redirect,bool &should_err_redirect){
   std::vector<std::string> args;
   std::string program;
   std::string current;
@@ -88,7 +88,8 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
         if(!current.empty()) {
           if(program.empty()) program = current;
           else {
-            if(current == "<" || current == "1>")redirection = true;
+            if(current == ">" || current == "1>")should_out_redirect = true;
+            else if(current == "2>")should_err_redirect = true;
             args.push_back(current);
           }
           current.erase();
@@ -102,7 +103,8 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   if(!current.empty()) {
     if(program.empty()) program = current;
     else {
-      if(current == "<" || current == "1>")redirection = true;
+      if(current == ">" || current == "1>")should_out_redirect = true;
+      else if(current == "2>")should_err_redirect = true;      
       args.push_back(current);
     }
     current.erase();
@@ -136,14 +138,21 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
         std::vector<char*> argv;
         argv.push_back(const_cast<char*>(program.c_str()));
 
-        bool should_redirect = false;
-        std::string loc = "";
-
+        bool should_out_redirect = false;
+        bool should_err_redirect = false;
+        std::string out_loc = "";
+        std::string err_loc = "";
         for(size_t i = 0; i < args.size(); ++i) {
           if (args[i] == ">" || args[i] == "1>") {
-            should_redirect = true;
+            should_out_redirect = true;
             if (i + 1 < args.size()) {
-                loc = args[i + 1]; // Get file following the operator
+                out_loc = args[i + 1]; // Get file following the operator
+            }
+            break; // Stop adding to argv once redirection starts
+          } else if (args[i] == "2>") {
+            should_err_redirect = true;
+            if (i + 1 < args.size()) {
+                err_loc = args[i + 1]; // Get file following the operator
             }
             break; // Stop adding to argv once redirection starts
           }
@@ -151,8 +160,8 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
         }
         argv.push_back(nullptr);
     
-        if(should_redirect && !loc.empty()){
-          int fd = open(loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if(should_out_redirect && !out_loc.empty()){
+          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
           if(fd == -1) {
             perror("open");return 1;
           }
@@ -162,13 +171,21 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
             return 1;
           }
 
-          // if(dup2(fd, STDERR_FILENO) == -1){
-          //   perror("dup2");
-          //   return 1;
-          // }
           close(fd);
         }
 
+        if(should_err_redirect && !err_loc.empty()){
+          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          if(fd == -1) {
+            perror("open");return 1;
+          }
+
+          if(dup2(fd, STDERR_FILENO) == -1){
+            perror("dup2");
+            return 1;
+          }
+          close(fd);
+        }
         execvp(full_path.c_str(), argv.data());
         perror("execv failed");
         exit(1);
@@ -213,11 +230,12 @@ int main() {
   while(true){
     std::cout << "$ ";
     std::string command;
-    bool redirection = false;
+    bool should_out_redirect = false;
+    bool should_err_redirect = false;
     std::getline(std::cin, command);
     std::stringstream ss(command);
 
-    auto [program,args] = getCommandArgs(command,redirection);
+    auto [program, args] = getCommandArgs(command, should_out_redirect, should_err_redirect);
 
     if (program == "exit") break;
 
@@ -228,22 +246,47 @@ int main() {
     } 
     else if(program == "echo") 
     {
-      if(redirection){
-        std::string loc = args[args.size()-1];
-        std::ofstream output_file(loc);
-        if(output_file.is_open()){
-          for(size_t i=0; i<args.size()-2 ; i++){
-            output_file << args[i];
-            output_file << ((i+1 != args.size()-2) ? ' ':'\n');
+      pid_t pid = fork();
+      if(pid == 0) {
+        if(should_out_redirect){
+          std::string out_loc = args[args.size()-1];
+          fs::path out_path(out_loc);
+          try {
+            fs::create_directories(out_path.parent_path());
+          } catch (const fs::filesystem_error& e) {
+            perror("mkdir");exit(1);
           }
-          output_file.close();
-        } else {
-          std::cerr << "Unable to open file" << '\n';
+          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          if(fd == -1){
+            perror("fd");exit(1);
+          }
+          if(dup2(fd,STDOUT_FILENO) == -1){
+            perror("dup2");exit(1);
+          }
+          close(fd);
         } 
-      }else{
-        for(size_t i=0; i<args.size() ; i++){
-          std::cout << args[i] << ((i+1 != args.size()) ? ' ':'\n');
+        if(should_err_redirect){
+          std::string err_loc = args[args.size()-1];
+          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          if(fd == -1){
+            perror("fd");return 1;
+          }
+          if(dup2(fd,STDERR_FILENO) == -1){
+            perror("dup2");return 1;
+          }
+          close(fd);
         }
+        int arg_len = args.size() - ((should_err_redirect || should_out_redirect) ? 2 : 0) ;
+        for(size_t i=0; i < arg_len ; ++i){
+          std::cout << args[i] ;
+          std::cout << ((i+1 != arg_len) ? ' ':'\n');
+        }
+        exit(0);
+      } else if ( pid > 0){
+        int status;
+        waitpid(pid, &status, 0);
+      } else {
+        perror("unable to fork");
       }
     } 
     else if(program == "type") 
