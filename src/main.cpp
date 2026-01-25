@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string>
 #include <sstream>
+#include <fstream>
 #include <cstdlib>
 #include <vector>
 #include <unistd.h>
@@ -16,6 +17,7 @@ namespace fs = std::filesystem;
 #else 
   #include <sys/types.h>
   #include <sys/wait.h>
+  #include <fcntl.h>
   const char PATH_SEP = ':';
 #endif
 
@@ -24,10 +26,10 @@ std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
 bool isExecutable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
 
-  auto perms = std::filesystem::status(path).permissions();
-  return ((perms & std::filesystem::perms::owner_exec) == std::filesystem::perms::owner_exec) ||
-         ((perms & std::filesystem::perms::group_exec) == std::filesystem::perms::group_exec) ||
-         ((perms & std::filesystem::perms::others_exec) == std::filesystem::perms::others_exec);
+  auto perms = fs::status(path).permissions();
+  return ((perms & fs::perms::owner_exec) == fs::perms::owner_exec) ||
+         ((perms & fs::perms::group_exec) == fs::perms::group_exec) ||
+         ((perms & fs::perms::others_exec) == fs::perms::others_exec);
 }
 
 bool checkBuiltin(const std::string& command){
@@ -37,7 +39,7 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command){
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &redirection){
   std::vector<std::string> args;
   std::string program;
   std::string current;
@@ -85,7 +87,10 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       } else if(std::isspace(c)){
         if(!current.empty()) {
           if(program.empty()) program = current;
-          else args.push_back(current);
+          else {
+            if(current == "<" || current == "1>")redirection = true;
+            args.push_back(current);
+          }
           current.erase();
         }
       } else {
@@ -96,7 +101,10 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
 
   if(!current.empty()) {
     if(program.empty()) program = current;
-    else args.push_back(current);
+    else {
+      if(current == "<" || current == "1>")redirection = true;
+      args.push_back(current);
+    }
     current.erase();
   }
   return std::make_pair(program,args);
@@ -127,11 +135,40 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
       if(pid == 0){
         std::vector<char*> argv;
         argv.push_back(const_cast<char*>(program.c_str()));
-        for(auto &arg: args) {
-          argv.push_back(const_cast<char*>(arg.c_str()));
+
+        bool should_redirect = false;
+        std::string loc = "";
+
+        for(size_t i = 0; i < args.size(); ++i) {
+          if (args[i] == ">" || args[i] == "1>") {
+            should_redirect = true;
+            if (i + 1 < args.size()) {
+                loc = args[i + 1]; // Get file following the operator
+            }
+            break; // Stop adding to argv once redirection starts
+          }
+          argv.push_back(const_cast<char*>(args[i].c_str()));
         }
         argv.push_back(nullptr);
-        
+    
+        if(should_redirect && !loc.empty()){
+          int fd = open(loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          if(fd == -1) {
+            perror("open");return 1;
+          }
+
+          if(dup2(fd, STDOUT_FILENO) == -1){
+            perror("dup2");
+            return 1;
+          }
+
+          // if(dup2(fd, STDERR_FILENO) == -1){
+          //   perror("dup2");
+          //   return 1;
+          // }
+          close(fd);
+        }
+
         execvp(full_path.c_str(), argv.data());
         perror("execv failed");
         exit(1);
@@ -176,10 +213,11 @@ int main() {
   while(true){
     std::cout << "$ ";
     std::string command;
+    bool redirection = false;
     std::getline(std::cin, command);
     std::stringstream ss(command);
 
-    auto [program,args] = getCommandArgs(command);
+    auto [program,args] = getCommandArgs(command,redirection);
 
     if (program == "exit") break;
 
@@ -190,8 +228,22 @@ int main() {
     } 
     else if(program == "echo") 
     {
-      for(size_t i=0; i<args.size() ; i++){
-        std::cout << args[i] << ((i+1 != args.size()) ? ' ':'\n');
+      if(redirection){
+        std::string loc = args[args.size()-1];
+        std::ofstream output_file(loc);
+        if(output_file.is_open()){
+          for(size_t i=0; i<args.size()-2 ; i++){
+            output_file << args[i];
+            output_file << ((i+1 != args.size()-2) ? ' ':'\n');
+          }
+          output_file.close();
+        } else {
+          std::cerr << "Unable to open file" << '\n';
+        } 
+      }else{
+        for(size_t i=0; i<args.size() ; i++){
+          std::cout << args[i] << ((i+1 != args.size()) ? ' ':'\n');
+        }
       }
     } 
     else if(program == "type") 
@@ -231,7 +283,6 @@ int main() {
     else 
     {
       //handle not builtin command
-
       if(!external_command_run(program,args,directories)) std:: cout << program << ": not found\n";
     }
   }
