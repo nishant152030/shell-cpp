@@ -39,7 +39,7 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &should_out_redirect,bool &should_err_redirect){
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &out_redirect,bool &err_redirect, bool &app_redirect, bool err_app_redirect){
   std::vector<std::string> args;
   std::string program;
   std::string current;
@@ -88,8 +88,10 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
         if(!current.empty()) {
           if(program.empty()) program = current;
           else {
-            if(current == ">" || current == "1>")should_out_redirect = true;
-            else if(current == "2>")should_err_redirect = true;
+            if(current == ">" || current == "1>")out_redirect = true;
+            else if(current == ">>" || current == "1>>")app_redirect = true;
+            else if(current == "2>")err_redirect = true;    
+            else if(current == "2>")err_app_redirect = true;   
             args.push_back(current);
           }
           current.erase();
@@ -103,8 +105,10 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   if(!current.empty()) {
     if(program.empty()) program = current;
     else {
-      if(current == ">" || current == "1>")should_out_redirect = true;
-      else if(current == "2>")should_err_redirect = true;      
+      if(current == ">" || current == "1>")out_redirect = true;
+      else if(current == ">>" || current == "1>>")app_redirect = true;
+      else if(current == "2>")err_redirect = true;    
+      else if(current == "2>")err_app_redirect = true;          
       args.push_back(current);
     }
     current.erase();
@@ -140,11 +144,19 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
 
         bool should_out_redirect = false;
         bool should_err_redirect = false;
+        bool append_redirect = false;
+        bool err_append_redirect = false;
         std::string out_loc = "";
         std::string err_loc = "";
         for(size_t i = 0; i < args.size(); ++i) {
           if (args[i] == ">" || args[i] == "1>") {
             should_out_redirect = true;
+            if (i + 1 < args.size()) {
+                out_loc = args[i + 1]; // Get file following the operator
+            }
+            break; // Stop adding to argv once redirection starts
+          } else if (args[i] == ">>" || args[i] == "1>>") {
+            append_redirect = true;
             if (i + 1 < args.size()) {
                 out_loc = args[i + 1]; // Get file following the operator
             }
@@ -155,13 +167,19 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
                 err_loc = args[i + 1]; // Get file following the operator
             }
             break; // Stop adding to argv once redirection starts
+          } else if (args[i] == "2>>") {
+            err_append_redirect = true;
+            if (i + 1 < args.size()) {
+                err_loc = args[i + 1]; // Get file following the operator
+            }
+            break; // Stop adding to argv once redirection starts
           }
           argv.push_back(const_cast<char*>(args[i].c_str()));
         }
         argv.push_back(nullptr);
     
-        if(should_out_redirect && !out_loc.empty()){
-          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if((should_out_redirect || append_redirect) && !out_loc.empty()){
+          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
           if(fd == -1) {
             perror("open");return 1;
           }
@@ -174,8 +192,8 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
           close(fd);
         }
 
-        if(should_err_redirect && !err_loc.empty()){
-          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if((should_err_redirect || err_append_redirect) && !err_loc.empty()){
+          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
           if(fd == -1) {
             perror("open");return 1;
           }
@@ -232,10 +250,12 @@ int main() {
     std::string command;
     bool should_out_redirect = false;
     bool should_err_redirect = false;
+    bool append_redirect = false;
+    bool err_append_redirect = false;
     std::getline(std::cin, command);
     std::stringstream ss(command);
 
-    auto [program, args] = getCommandArgs(command, should_out_redirect, should_err_redirect);
+    auto [program, args] = getCommandArgs(command, should_out_redirect, should_err_redirect, append_redirect, err_append_redirect);
 
     if (program == "exit") break;
 
@@ -248,7 +268,7 @@ int main() {
     {
       pid_t pid = fork();
       if(pid == 0) {
-        if(should_out_redirect){
+        if(should_out_redirect || append_redirect){
           std::string out_loc = args[args.size()-1];
           fs::path out_path(out_loc);
           try {
@@ -256,7 +276,7 @@ int main() {
           } catch (const fs::filesystem_error& e) {
             perror("mkdir");exit(1);
           }
-          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
           if(fd == -1){
             perror("fd");exit(1);
           }
@@ -265,9 +285,9 @@ int main() {
           }
           close(fd);
         } 
-        if(should_err_redirect){
+        if(should_err_redirect || err_append_redirect){
           std::string err_loc = args[args.size()-1];
-          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
           if(fd == -1){
             perror("fd");return 1;
           }
@@ -276,7 +296,7 @@ int main() {
           }
           close(fd);
         }
-        int arg_len = args.size() - ((should_err_redirect || should_out_redirect) ? 2 : 0) ;
+        int arg_len = args.size() - ((should_err_redirect || should_out_redirect || append_redirect || err_append_redirect) ? 2 : 0) ;
         for(size_t i=0; i < arg_len ; ++i){
           std::cout << args[i] ;
           std::cout << ((i+1 != arg_len) ? ' ':'\n');
