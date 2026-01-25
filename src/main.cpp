@@ -91,7 +91,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
             if(current == ">" || current == "1>")out_redirect = true;
             else if(current == ">>" || current == "1>>")app_redirect = true;
             else if(current == "2>")err_redirect = true;    
-            else if(current == "2>")err_app_redirect = true;   
+            else if(current == "2>>")err_app_redirect = true;   
             args.push_back(current);
           }
           current.erase();
@@ -108,7 +108,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       if(current == ">" || current == "1>")out_redirect = true;
       else if(current == ">>" || current == "1>>")app_redirect = true;
       else if(current == "2>")err_redirect = true;    
-      else if(current == "2>")err_app_redirect = true;          
+      else if(current == "2>>")err_app_redirect = true;          
       args.push_back(current);
     }
     current.erase();
