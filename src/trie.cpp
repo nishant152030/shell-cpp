@@ -58,7 +58,7 @@ namespace Trie {
             if(curr->children[(c-'a')] == nullptr) return {};
             curr = curr->children[(c-'a')];
         }
-        std::vector<std::string> words;
+        std::vector<std::string> words = {};
         findAllWords(curr, "", words);
         return words;
     }

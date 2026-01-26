@@ -269,11 +269,14 @@ int main() {
     while(true) {
       char c = getChar();
       if(c == '\t') {
-        std::string word = (Trie::autoComplete(root,command))[0];
-        if(!word.empty()) {
+        std::vector<std::string> words = Trie::autoComplete(root,command);
+        if(!words.empty()) {
+          std::string word = words[0];
           word += " ";
           command += word;
           std::cout << word << std::flush;
+        }else {
+          std::cout << '\a' << std::flush;
         }
       } else {
         std::cout << c << std::flush;
