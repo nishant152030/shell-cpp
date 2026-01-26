@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <regex>
 #include <fcntl.h>
+#include "trie.h"
 // #include <boost/program_options/parser.hpp>
 namespace fs = std::filesystem;
 // using namespace std;
@@ -16,10 +17,12 @@ namespace fs = std::filesystem;
   #include <windows.h>
   #include <io.h>
   #include <sys/stat.h>
+  #include <conio.h>
   const char PATH_SEP = ';';
 #else 
   #include <sys/types.h>
   #include <sys/wait.h>
+  #include <termios.h>
   const char PATH_SEP = ':';
 #endif
 
@@ -210,11 +213,37 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
   return false;
 }
 
+
+char getChar() {
+  #ifdef _WIN32
+    return _getch();
+  #else
+    char buf = 0;
+    struct termios old  = {0};
+    if(tcgetattr(0, &old) < 0) perror("tcgetattr");
+    old.c_lflag &= ~ICANON; // Disable line buffering
+    old.c_lflag &= ~ECHO;   // Disable local echo
+    old.c_cc[VMIN] = 1;
+    old.c_cc[VTIME] = 0;
+    if (tcsetattr(0, TCSANOW, &old) < 0) perror("tcsetattr ICANON");
+    if (read(0, &buf, 1) < 0) perror("read()");
+    old.c_lflag |= ICANON;
+    old.c_lflag |= ECHO;
+    if (tcsetattr(0, TCSADRAIN, &old) < 0) perror("tcsetattr ~ICANON");
+    return buf;
+  #endif
+}
+
 int main() {
   // Flush after every std::cout / std:cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
 
+  // Make builtin Trie for auto complete
+  Trie::TrieNode* root = new Trie::TrieNode();
+  for(auto &cmd: builtins) {
+    Trie::insert(root,cmd);
+  } 
   // TODO: Uncomment the code below to pass the first stage
 
   const char* raw_env = std::getenv("PATH");
@@ -237,7 +266,22 @@ int main() {
     std::cout << "$ ";
     std::string command;
     
-    std::getline(std::cin, command);
+    while(true) {
+      char c = getChar();
+      if(c == '\t') {
+        std::string word = (Trie::autoComplete(root,command))[0];
+        if(!word.empty()) {
+          word += " ";
+          command += word;
+          std::cout << word << std::flush;
+        }
+      } else {
+        std::cout << c << std::flush;
+        if (c == '\r' || c == '\n')break;
+        else command += c;
+      }
+    }
+
     std::stringstream ss(command);
 
     auto [program, args] = getCommandArgs(command);

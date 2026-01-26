@@ -1,0 +1,22 @@
+#pragma once
+#include <string>
+#include <vector>
+namespace Trie {
+    class TrieNode
+    {
+    public:
+        bool isLeaf;
+        TrieNode* children[26];
+        TrieNode();
+        ~TrieNode();
+    };
+    
+    void insert(TrieNode* root, const std::string &key);
+
+    bool search(TrieNode* root, const std::string &key);
+
+    bool isPrefix(TrieNode* root, const std::string &key);
+
+    std::vector<std::string> autoComplete(TrieNode* root, const std::string &key);
+}
+
