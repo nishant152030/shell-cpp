@@ -116,6 +116,68 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   return std::make_pair(program,args);
 }
 
+std::vector<char*> handle_args(const std::string &program, std::vector<std::string> &args){
+    std::vector<char*> argv;
+    argv.push_back(const_cast<char*>(program.c_str()));
+    bool should_out_redirect = false;
+    bool should_err_redirect = false;
+    bool append_redirect = false;
+    bool err_append_redirect = false;
+    std::string out_loc = "";
+    std::string err_loc = "";
+    for(size_t i = 0; i < args.size(); ++i) {
+      if (args[i] == ">" || args[i] == "1>") {
+        should_out_redirect = true;
+        if (i + 1 < args.size()) {
+            out_loc = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == ">>" || args[i] == "1>>") {
+        append_redirect = true;
+        if (i + 1 < args.size()) {
+            out_loc = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == "2>") {
+        should_err_redirect = true;
+        if (i + 1 < args.size()) {
+            err_loc = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == "2>>") {
+        err_append_redirect = true;
+        if (i + 1 < args.size()) {
+            err_loc = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      }
+      argv.push_back(const_cast<char*>(args[i].c_str()));
+    }
+    argv.push_back(nullptr);
+
+    if((should_out_redirect || append_redirect) && !out_loc.empty()){
+      int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(fd == -1) {
+        perror("open");
+      }
+      if(dup2(fd, STDOUT_FILENO) == -1){
+        perror("dup2");
+      }
+      close(fd);
+    }
+    if((should_err_redirect || err_append_redirect) && !err_loc.empty()){
+      int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(fd == -1) {
+        perror("open");
+      }
+      if(dup2(fd, STDERR_FILENO) == -1){
+        perror("dup2");
+      }
+      close(fd);
+    }
+    return argv;
+}
+
 bool external_command_run(const std::string &program, std::vector<std::string> &args, std::vector<fs::path> &dirs){
 
   for(auto &dir: dirs){
@@ -139,71 +201,7 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
     #else
       pid_t pid = fork();
       if(pid == 0){
-        std::vector<char*> argv;
-        argv.push_back(const_cast<char*>(program.c_str()));
-
-        bool should_out_redirect = false;
-        bool should_err_redirect = false;
-        bool append_redirect = false;
-        bool err_append_redirect = false;
-        std::string out_loc = "";
-        std::string err_loc = "";
-        for(size_t i = 0; i < args.size(); ++i) {
-          if (args[i] == ">" || args[i] == "1>") {
-            should_out_redirect = true;
-            if (i + 1 < args.size()) {
-                out_loc = args[i + 1]; // Get file following the operator
-            }
-            break; // Stop adding to argv once redirection starts
-          } else if (args[i] == ">>" || args[i] == "1>>") {
-            append_redirect = true;
-            if (i + 1 < args.size()) {
-                out_loc = args[i + 1]; // Get file following the operator
-            }
-            break; // Stop adding to argv once redirection starts
-          } else if (args[i] == "2>") {
-            should_err_redirect = true;
-            if (i + 1 < args.size()) {
-                err_loc = args[i + 1]; // Get file following the operator
-            }
-            break; // Stop adding to argv once redirection starts
-          } else if (args[i] == "2>>") {
-            err_append_redirect = true;
-            if (i + 1 < args.size()) {
-                err_loc = args[i + 1]; // Get file following the operator
-            }
-            break; // Stop adding to argv once redirection starts
-          }
-          argv.push_back(const_cast<char*>(args[i].c_str()));
-        }
-        argv.push_back(nullptr);
-    
-        if((should_out_redirect || append_redirect) && !out_loc.empty()){
-          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
-          if(fd == -1) {
-            perror("open");return 1;
-          }
-
-          if(dup2(fd, STDOUT_FILENO) == -1){
-            perror("dup2");
-            return 1;
-          }
-
-          close(fd);
-        }
-
-        if((should_err_redirect || err_append_redirect) && !err_loc.empty()){
-          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
-          if(fd == -1) {
-            perror("open");return 1;
-          }
-
-          if(dup2(fd, STDERR_FILENO) == -1){
-            perror("dup2");
-            return 1;
-          }
-          close(fd);
-        }
+        std::vector<char*> argv = handle_args(program,args);
         execvp(full_path.c_str(), argv.data());
         perror("execv failed");
         exit(1);
@@ -268,38 +266,10 @@ int main() {
     {
       pid_t pid = fork();
       if(pid == 0) {
-        if(should_out_redirect || append_redirect){
-          std::string out_loc = args[args.size()-1];
-          fs::path out_path(out_loc);
-          try {
-            fs::create_directories(out_path.parent_path());
-          } catch (const fs::filesystem_error& e) {
-            perror("mkdir");exit(1);
-          }
-          int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
-          if(fd == -1){
-            perror("fd");exit(1);
-          }
-          if(dup2(fd,STDOUT_FILENO) == -1){
-            perror("dup2");exit(1);
-          }
-          close(fd);
-        } 
-        if(should_err_redirect || err_append_redirect){
-          std::string err_loc = args[args.size()-1];
-          int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
-          if(fd == -1){
-            perror("fd");return 1;
-          }
-          if(dup2(fd,STDERR_FILENO) == -1){
-            perror("dup2");return 1;
-          }
-          close(fd);
-        }
-        int arg_len = args.size() - ((should_err_redirect || should_out_redirect || append_redirect || err_append_redirect) ? 2 : 0) ;
-        for(size_t i=0; i < arg_len ; ++i){
-          std::cout << args[i] ;
-          std::cout << ((i+1 != arg_len) ? ' ':'\n');
+        std::vector<char*> argv = handle_args(program,args);
+        for(size_t i = 1; i < argv.size()-1; ++i) {
+          std::cout << argv[i] ;
+          std::cout << ((i == argv.size()-2) ? '\n' : ' ');
         }
         exit(0);
       } else if ( pid > 0){
