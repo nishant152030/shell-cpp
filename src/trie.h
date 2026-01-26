@@ -1,12 +1,13 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <map>
 namespace Trie {
     class TrieNode
     {
     public:
         bool isLeaf;
-        TrieNode* children[26];
+        std::map<char, TrieNode*> children;
         TrieNode();
         ~TrieNode();
     };

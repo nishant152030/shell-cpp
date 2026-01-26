@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 #endif
 
 std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
-
+std::vector<std::string> custom_executable = {};
 bool isExecutable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
 
@@ -238,20 +238,15 @@ int main() {
   // Flush after every std::cout / std:cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
-
-  // Make builtin Trie for auto complete
-  Trie::TrieNode* root = new Trie::TrieNode();
-  for(auto &cmd: builtins) {
-    Trie::insert(root,cmd);
-  } 
+  
   // TODO: Uncomment the code below to pass the first stage
-
+  
   const char* raw_env = std::getenv("PATH");
   const char* raw_home_env = std::getenv("HOME");
-
+  
   std::string path_env(raw_env);
   fs::path home_env(raw_home_env);
-
+  
   std::vector<fs::path> directories;
   
   std::stringstream ss(path_env);
@@ -260,6 +255,26 @@ int main() {
     if(!item.empty()){
       directories.push_back(fs::path(item));
     }
+  }
+  
+  for(fs::path &dir: directories) {
+    try {
+      for(const auto &entry: fs::directory_iterator(dir)){
+        if(isExecutable(entry.path().string())) {
+          custom_executable.push_back(entry.path().filename().string());
+        }
+      }
+    } catch (const fs::filesystem_error &e){
+      std::cerr << "Error: " << e.what() << std::endl;
+    }
+  }
+  // Make builtin Trie for auto complete
+  Trie::TrieNode* root = new Trie::TrieNode();
+  for(auto &cmd: builtins) {
+    Trie::insert(root,cmd);
+  } 
+  for(auto &custom_exe: custom_executable) {
+    Trie::insert(root,custom_exe);
   }
 
   while(true){

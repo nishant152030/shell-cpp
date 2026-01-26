@@ -4,20 +4,22 @@
 namespace Trie {
     TrieNode::TrieNode() {
         isLeaf = false;
-        for(size_t i = 0; i < 26; ++i) children[i] = nullptr;
     }
     TrieNode::~TrieNode() {
-        delete[] children;
+        for(auto &pr: children){
+            delete pr.second;
+        }
+        children.clear();
     }
 
     void insert(TrieNode* root, const std::string &key) {
         TrieNode* curr = root;
         for(const char &c: key) {
-            if(curr->children[(c-'a')] == nullptr) {
+            if(curr->children.find(c) == curr->children.end()) {
                 TrieNode* new_node = new TrieNode();
-                curr->children[(c-'a')] = new_node;
+                curr->children[c] = new_node;
             } 
-            curr = curr->children[(c-'a')];
+            curr = curr->children[c];
         }
         curr->isLeaf = true;
     }
@@ -25,8 +27,8 @@ namespace Trie {
     bool search(TrieNode* root, const std::string &key) {
         TrieNode* curr = root;
         for(const char &c: key) {
-            if(curr->children[(c-'a')] == nullptr) return false;
-            curr = curr->children[(c-'a')];
+            if(curr->children.find(c) == curr->children.end()) return false;
+            curr = curr->children[c];
         }
         return curr->isLeaf;
     }
@@ -34,8 +36,8 @@ namespace Trie {
     bool isPrefix(TrieNode* root, const std::string &key) {
         TrieNode* curr = root;
         for(const char &c: key) {
-            if(curr->children[(c-'a')] == nullptr) return false;
-            curr = curr->children[(c-'a')];
+            if(curr->children.find(c) == curr->children.end()) return false;
+            curr = curr->children[c];
         }
         return true;
     }
@@ -44,19 +46,16 @@ namespace Trie {
         if(node->isLeaf){
             words.push_back(currendWord);
         }
-        for(size_t i = 0; i < 26 ; ++i) {
-            if(node->children[i]) {
-                char c = 'a' + i;
-                findAllWords(node->children[i], currendWord + c, words);
-            }
+        for(auto &[c,nextNode]: node->children) {
+            findAllWords(nextNode, currendWord + c, words);
         }
     }
 
     std::vector<std::string> autoComplete(TrieNode* root, const std::string &key){
         TrieNode* curr = root;
         for(const char &c: key) {
-            if(curr->children[(c-'a')] == nullptr) return {};
-            curr = curr->children[(c-'a')];
+            if(curr->children.find(c) == curr->children.end()) return {};
+            curr = curr->children[c];
         }
         std::vector<std::string> words = {};
         findAllWords(curr, "", words);
