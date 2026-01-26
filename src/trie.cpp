@@ -51,7 +51,17 @@ namespace Trie {
         }
     }
 
-    std::vector<std::string> autoComplete(TrieNode* root, const std::string &key){
+    std::string longestCommonPrefix(TrieNode* node) {
+        std::string prefix = "";
+        while(node->children.size() == 1 && !node->isLeaf){
+            auto [ch, next] = *(node->children.begin());
+            prefix += ch;
+            node = next;
+        }
+        return prefix;
+    }
+
+    std::pair<std::string,std::vector<std::string>> autoComplete(TrieNode* root, const std::string &key){
         TrieNode* curr = root;
         for(const char &c: key) {
             if(curr->children.find(c) == curr->children.end()) return {};
@@ -59,6 +69,6 @@ namespace Trie {
         }
         std::vector<std::string> words = {};
         findAllWords(curr, "", words);
-        return words;
+        return std::make_pair(longestCommonPrefix(curr), words);
     }
 }

@@ -284,7 +284,7 @@ int main() {
     while(true) {
       char c = getChar();
       if(c == '\t') {
-        std::vector<std::string> words = Trie::autoComplete(root,command);
+        auto [prefix,words] = Trie::autoComplete(root,command);
         if(words.empty()) std::cout << '\a' << std::flush;
         else if(prev_char == '\t') {
           prev_char = '\0';
@@ -293,18 +293,18 @@ int main() {
             std::cout << command << s << "  ";
           }
           std::cout << '\n';
-          
           std::cout << "$ " << command << std::flush;
         } else {
-          if(words.size() == 1) {
-            command += words[0];
-            command += " ";
-            std::cout << words[0] << " " << std::flush;
+          if(!prefix.empty()) {
+            command += prefix;
+            std::string add =  ((words.size() == 1) ? " ":"");
+            command += add;
+            std::cout << prefix << add << std::flush;
           } else {
             std::cout << '\a' << std::flush;
             prev_char = '\t';
           }
-        }
+        } 
       } else {
         std::cout << c << std::flush;
         if (c == '\r' || c == '\n')break;

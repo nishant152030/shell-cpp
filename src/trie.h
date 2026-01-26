@@ -18,6 +18,6 @@ namespace Trie {
 
     bool isPrefix(TrieNode* root, const std::string &key);
 
-    std::vector<std::string> autoComplete(TrieNode* root, const std::string &key);
+    std::pair<std::string,std::vector<std::string>> autoComplete(TrieNode* root, const std::string &key);
 }
 
