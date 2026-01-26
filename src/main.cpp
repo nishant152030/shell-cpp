@@ -238,7 +238,7 @@ int main() {
   // Flush after every std::cout / std:cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
-  
+
   // TODO: Uncomment the code below to pass the first stage
   
   const char* raw_env = std::getenv("PATH");
@@ -280,23 +280,36 @@ int main() {
   while(true){
     std::cout << "$ ";
     std::string command;
-    
+    char prev_char = '\0';
     while(true) {
       char c = getChar();
       if(c == '\t') {
         std::vector<std::string> words = Trie::autoComplete(root,command);
-        if(!words.empty()) {
-          std::string word = words[0];
-          word += " ";
-          command += word;
-          std::cout << word << std::flush;
-        }else {
-          std::cout << '\a' << std::flush;
+        if(words.empty()) std::cout << '\a' << std::flush;
+        else if(prev_char == '\t') {
+          prev_char = '\0';
+          std::cout << '\n';
+          for(auto &s: words) {
+            std::cout << command << s << "  ";
+          }
+          std::cout << '\n';
+          
+          std::cout << "$ " << command << std::flush;
+        } else {
+          if(words.size() == 1) {
+            command += words[0];
+            command += " ";
+            std::cout << words[0] << " " << std::flush;
+          } else {
+            std::cout << '\a' << std::flush;
+            prev_char = '\t';
+          }
         }
       } else {
         std::cout << c << std::flush;
         if (c == '\r' || c == '\n')break;
         else command += c;
+        prev_char = c;
       }
     }
 
