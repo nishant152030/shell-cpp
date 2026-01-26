@@ -7,17 +7,19 @@
 #include <unistd.h>
 #include <filesystem>
 #include <regex>
+#include <fcntl.h>
 // #include <boost/program_options/parser.hpp>
 namespace fs = std::filesystem;
 // using namespace std;
 
 #ifdef _WIN32
-#include <windows.h>
+  #include <windows.h>
+  #include <io.h>
+  #include <sys/stat.h>
   const char PATH_SEP = ';';
 #else 
   #include <sys/types.h>
   #include <sys/wait.h>
-  #include <fcntl.h>
   const char PATH_SEP = ':';
 #endif
 
@@ -39,7 +41,7 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command,bool &out_redirect,bool &err_redirect, bool &app_redirect, bool &err_app_redirect){
+std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command){
   std::vector<std::string> args;
   std::string program;
   std::string current;
@@ -87,13 +89,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       } else if(std::isspace(c)){
         if(!current.empty()) {
           if(program.empty()) program = current;
-          else {
-            if(current == ">" || current == "1>")out_redirect = true;
-            else if(current == ">>" || current == "1>>")app_redirect = true;
-            else if(current == "2>")err_redirect = true;    
-            else if(current == "2>>")err_app_redirect = true;   
-            args.push_back(current);
-          }
+          else args.push_back(current);
           current.erase();
         }
       } else {
@@ -104,13 +100,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
 
   if(!current.empty()) {
     if(program.empty()) program = current;
-    else {
-      if(current == ">" || current == "1>")out_redirect = true;
-      else if(current == ">>" || current == "1>>")app_redirect = true;
-      else if(current == "2>")err_redirect = true;    
-      else if(current == "2>>")err_app_redirect = true;          
-      args.push_back(current);
-    }
+    else args.push_back(current);
     current.erase();
   }
   return std::make_pair(program,args);
@@ -246,14 +236,11 @@ int main() {
   while(true){
     std::cout << "$ ";
     std::string command;
-    bool should_out_redirect = false;
-    bool should_err_redirect = false;
-    bool append_redirect = false;
-    bool err_append_redirect = false;
+    
     std::getline(std::cin, command);
     std::stringstream ss(command);
 
-    auto [program, args] = getCommandArgs(command, should_out_redirect, should_err_redirect, append_redirect, err_append_redirect);
+    auto [program, args] = getCommandArgs(command);
 
     if (program == "exit") break;
 
@@ -264,20 +251,23 @@ int main() {
     } 
     else if(program == "echo") 
     {
-      pid_t pid = fork();
-      if(pid == 0) {
-        std::vector<char*> argv = handle_args(program,args);
-        for(size_t i = 1; i < argv.size()-1; ++i) {
-          std::cout << argv[i] ;
-          std::cout << ((i == argv.size()-2) ? '\n' : ' ');
+      #ifdef _WIN32
+      #else
+        pid_t pid = fork();
+        if(pid == 0) {
+          std::vector<char*> argv = handle_args(program,args);
+          for(size_t i = 1; i < argv.size()-1; ++i) {
+            std::cout << argv[i] ;
+            std::cout << ((i == argv.size()-2) ? '\n' : ' ');
+          }
+          exit(0);
+        } else if ( pid > 0){
+          int status;
+          waitpid(pid, &status, 0);
+        } else {
+          perror("unable to fork");
         }
-        exit(0);
-      } else if ( pid > 0){
-        int status;
-        waitpid(pid, &status, 0);
-      } else {
-        perror("unable to fork");
-      }
+      #endif
     } 
     else if(program == "type") 
     {
