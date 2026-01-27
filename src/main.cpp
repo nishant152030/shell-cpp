@@ -26,8 +26,77 @@ namespace fs = std::filesystem;
   const char PATH_SEP = ':';
 #endif
 
+struct Command {
+  std::vector<std::string> args;
+  std::string out_file;
+  std::vector<char*> argv;
+
+  bool should_out_redirect = false;
+  bool should_err_redirect = false;
+  bool append_redirect = false;
+  bool err_append_redirect = false;
+  
+  void get_argv() {
+    for(size_t i = 0; i < args.size(); ++i) {
+      if (args[i] == ">" || args[i] == "1>") {
+        should_out_redirect = true;
+        if (i + 1 < args.size()) {
+            out_file = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == ">>" || args[i] == "1>>") {
+        append_redirect = true;
+        if (i + 1 < args.size()) {
+            out_file = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == "2>") {
+        should_err_redirect = true;
+        if (i + 1 < args.size()) {
+            out_file = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      } else if (args[i] == "2>>") {
+        err_append_redirect = true;
+        if (i + 1 < args.size()) {
+            out_file = args[i + 1]; // Get file following the operator
+        }
+        break; // Stop adding to argv once redirection starts
+      }
+      argv.push_back(const_cast<char*>(args[i].c_str()));
+    }
+    argv.push_back(nullptr);
+  }
+
+  void prepare_redirection(){
+    if((should_out_redirect || append_redirect) && !out_file.empty()){
+      int fd = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(fd == -1) {
+        perror("open");
+      }
+      if(dup2(fd, STDOUT_FILENO) == -1){
+        perror("dup2");
+      }
+      close(fd);
+    }
+    if((should_err_redirect || err_append_redirect) && !out_file.empty()){
+      int fd = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(fd == -1) {
+        perror("open");
+      }
+      if(dup2(fd, STDERR_FILENO) == -1){
+        perror("dup2");
+      }
+      close(fd);
+    }
+  }
+};
+
 std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
 std::vector<std::string> custom_executable = {};
+std::vector<fs::path> directories;
+fs::path home_env;
+
 bool isExecutable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
 
@@ -44,10 +113,9 @@ bool checkBuiltin(const std::string& command){
   return false;
 }
 
-std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string &command){
-  std::vector<std::string> args;
-  std::string program;
-  std::string current;
+std::vector<std::string> getCommandArgs(const std::string &command){
+  std::vector<std::string> tokens;
+  std::string token;
 
   char quoteChar = '\0';  // '\0' means not in quotes, '"' or '\'' means in that type of quote
   bool escaped = false;
@@ -55,7 +123,7 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
   for(size_t i = 0; i < command.size() ; i++){
     char c = command[i];
     if(escaped){
-      current += c;
+      token += c;
       escaped = false;
       continue;
     }
@@ -66,13 +134,13 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
     // - Inside single quotes: backslash has no special meaning
     if(c == '\\'){
       if(quoteChar == '\''){
-        current += c;
+        token += c;
       }else if(quoteChar == '\"') {
         char next_char = (i+1 == command.size()) ? '\0' : command[i+1];
         if(next_char == '\"' || next_char == '$' || next_char == '\\' || next_char == '\n' || next_char == '`') {
           escaped = true;
         }else {
-          current += c;
+          token += c;
         }
       }else escaped = true;
       continue;
@@ -83,104 +151,54 @@ std::pair<std::string,std::vector<std::string>> getCommandArgs(const std::string
       if(c == quoteChar){
         quoteChar = '\0';  // End quotes
       } else {
-        current += c;
+        token += c;
       }
     } else {
       // Not in quotes
       if(c == '\'' || c == '\"'){
         quoteChar = c;  // Start quotes
       } else if(std::isspace(c)){
-        if(!current.empty()) {
-          if(program.empty()) program = current;
-          else args.push_back(current);
-          current.erase();
+        if(!token.empty()) {
+          tokens.push_back(token);
+          token.erase();
         }
       } else {
-        current += c;
+        token += c;
       }
     }
   }
 
-  if(!current.empty()) {
-    if(program.empty()) program = current;
-    else args.push_back(current);
-    current.erase();
+  if(!token.empty()) {
+    tokens.push_back(token);
   }
-  return std::make_pair(program,args);
+  return tokens;
 }
 
-std::vector<char*> handle_args(const std::string &program, std::vector<std::string> &args){
-    std::vector<char*> argv;
-    argv.push_back(const_cast<char*>(program.c_str()));
-    bool should_out_redirect = false;
-    bool should_err_redirect = false;
-    bool append_redirect = false;
-    bool err_append_redirect = false;
-    std::string out_loc = "";
-    std::string err_loc = "";
-    for(size_t i = 0; i < args.size(); ++i) {
-      if (args[i] == ">" || args[i] == "1>") {
-        should_out_redirect = true;
-        if (i + 1 < args.size()) {
-            out_loc = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == ">>" || args[i] == "1>>") {
-        append_redirect = true;
-        if (i + 1 < args.size()) {
-            out_loc = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == "2>") {
-        should_err_redirect = true;
-        if (i + 1 < args.size()) {
-            err_loc = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == "2>>") {
-        err_append_redirect = true;
-        if (i + 1 < args.size()) {
-            err_loc = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      }
-      argv.push_back(const_cast<char*>(args[i].c_str()));
-    }
-    argv.push_back(nullptr);
+std::vector<Command> parse_input(const std::vector<std::string> &tokens){
+  std::vector<Command> pipeline;
+  Command current_cmd;
 
-    if((should_out_redirect || append_redirect) && !out_loc.empty()){
-      int fd = open(out_loc.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(fd == -1) {
-        perror("open");
-      }
-      if(dup2(fd, STDOUT_FILENO) == -1){
-        perror("dup2");
-      }
-      close(fd);
+  for (size_t i = 0; i < tokens.size(); ++i) {
+        if (tokens[i] == "|") {
+            pipeline.push_back(current_cmd);
+            current_cmd = Command(); // Reset for next command
+        } else {
+            current_cmd.args.push_back(tokens[i]);
+        }
     }
-    if((should_err_redirect || err_append_redirect) && !err_loc.empty()){
-      int fd = open(err_loc.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(fd == -1) {
-        perror("open");
-      }
-      if(dup2(fd, STDERR_FILENO) == -1){
-        perror("dup2");
-      }
-      close(fd);
-    }
-    return argv;
+    if (!current_cmd.args.empty()) pipeline.push_back(current_cmd);
+    return pipeline;
 }
 
-bool external_command_run(const std::string &program, std::vector<std::string> &args, std::vector<fs::path> &dirs){
+bool external_command_run(const std::string &program, std::vector<char*> &argv){
 
-  for(auto &dir: dirs){
+  for(auto &dir: directories){
     fs::path full_path = dir / program; 
     if(!isExecutable(full_path.string())) continue;;
   
     #ifdef _WIN32
       std::string cmd = "\"" + full_path.string() + "\"";\
-      for(const auto &a: args) cmd += "\"" + a + "\"";
-  
+      for(const auto &a: argv) {cmd += "\""; cmd += a; cmd += "\"";}
       STARTUPINFOA si{};
       PROCESS_INFORMATION pi{};
       si.cb = sizeof(si);
@@ -192,25 +210,68 @@ bool external_command_run(const std::string &program, std::vector<std::string> &
   
       return true;
     #else
-      pid_t pid = fork();
-      if(pid == 0){
-        std::vector<char*> argv = handle_args(program,args);
-        execvp(full_path.c_str(), argv.data());
-        perror("execv failed");
-        exit(1);
-  
-      } else if ( pid > 0){
-        int status;
-        waitpid(pid, &status, 0);
-        if (WIFEXITED(status) && WEXITSTATUS(status) == 127) continue;
-        return true;
-      } else {
-        perror("fork failed");
-      }
+      execvp(full_path.c_str(), argv.data());
+      exit(1);
+      return true;
     #endif 
 
   }
   return false;
+}
+
+bool execute_command(const std::string &program, std::vector<char*> &argv) {
+  if (program == "exit") return false;
+  if(program == "pwd")
+  {
+    fs::path cwd = fs::current_path();
+    std::cout << cwd.string() << '\n';
+  } 
+  else if(program == "echo") 
+  {
+    for(size_t i = 1; i < argv.size()-1; ++i) {
+      std::cout << argv[i] ;
+      std::cout << ((i == argv.size()-2) ? '\n' : ' ');
+    } 
+  } 
+  else if(program == "type") 
+  {
+    for(auto &arg: argv){
+      if(checkBuiltin(arg))
+      {
+        std::cout << arg << " is a shell builtin\n";
+      }
+      else
+      {
+        bool found = false;
+        for(auto dir: directories){
+          fs::path filePath = dir / arg;
+          if(isExecutable(filePath.string())){
+            std::cout<< arg << " is " << filePath.make_preferred().string() << '\n';
+            found = true;
+          }
+          if(found) break;
+        }
+        if(!found) std:: cout << arg <<": not found\n";
+      } 
+    }
+  } 
+  else if(program == "cd") {
+    if(argv.size()>2){
+      std::string new_dir = argv[1];
+      if(new_dir == "~") new_dir = home_env.string();
+      try {
+        fs::current_path(new_dir);
+      } catch (const fs::filesystem_error& e){
+        std::cerr << "cd: " << new_dir << ": " << e.code().message() << '\n';
+      }
+    }
+  }
+  else 
+  {
+    //handle not builtin command
+    if(!external_command_run(program,argv)) std:: cout << program << ": not found\n";
+  }
+  return true;
 }
 
 
@@ -242,13 +303,11 @@ int main() {
   // TODO: Uncomment the code below to pass the first stage
   
   const char* raw_env = std::getenv("PATH");
-  const char* raw_home_env = std::getenv("HOME");
+  char* raw_home_env = std::getenv("HOME");
   
   std::string path_env(raw_env);
-  fs::path home_env(raw_home_env);
-  
-  std::vector<fs::path> directories;
-  
+  home_env = raw_home_env;
+
   std::stringstream ss(path_env);
   std::string item;
   while(std::getline(ss,item,PATH_SEP)){
@@ -279,26 +338,27 @@ int main() {
 
   while(true){
     std::cout << "$ ";
-    std::string command;
+    std::string input;
+
     char prev_char = '\0';
     while(true) {
       char c = getChar();
       if(c == '\t') {
-        auto [prefix,words] = Trie::autoComplete(root,command);
+        auto [prefix,words] = Trie::autoComplete(root,input);
         if(words.empty()) std::cout << '\a' << std::flush;
         else if(prev_char == '\t') {
           prev_char = '\0';
           std::cout << '\n';
           for(auto &s: words) {
-            std::cout << command << s << "  ";
+            std::cout << input << s << "  ";
           }
           std::cout << '\n';
-          std::cout << "$ " << command << std::flush;
+          std::cout << "$ " << input << std::flush;
         } else {
           if(!prefix.empty()) {
-            command += prefix;
+            input += prefix;
             std::string add =  ((words.size() == 1) ? " ":"");
-            command += add;
+            input += add;
             std::cout << prefix << add << std::flush;
           } else {
             std::cout << '\a' << std::flush;
@@ -308,80 +368,53 @@ int main() {
       } else {
         std::cout << c << std::flush;
         if (c == '\r' || c == '\n')break;
-        else command += c;
+        else input += c;
         prev_char = c;
       }
     }
 
-    std::stringstream ss(command);
+    std::stringstream ss(input);
 
-    auto [program, args] = getCommandArgs(command);
-
-    if (program == "exit") break;
-
-    if(program == "pwd")
-    {
-      fs::path cwd = fs::current_path();
-      std::cout << cwd.string() << '\n';
-    } 
-    else if(program == "echo") 
-    {
-      #ifdef _WIN32
-      #else
-        pid_t pid = fork();
-        if(pid == 0) {
-          std::vector<char*> argv = handle_args(program,args);
-          for(size_t i = 1; i < argv.size()-1; ++i) {
-            std::cout << argv[i] ;
-            std::cout << ((i == argv.size()-2) ? '\n' : ' ');
-          }
-          exit(0);
-        } else if ( pid > 0){
-          int status;
-          waitpid(pid, &status, 0);
-        } else {
-          perror("unable to fork");
+    std::vector<std::string> tokens = getCommandArgs(input);
+    std::vector<Command> pipeline = parse_input(tokens);
+    
+    int num_cmds = pipeline.size();
+    int pipe_fds[2];
+    int prev_pipe_read = -1;
+    
+    for(size_t i = 0; i < num_cmds ; ++i) {
+      pipeline[i].get_argv();
+      
+      if(i < (num_cmds - 1)) pipe(pipe_fds);
+      pid_t pid = fork();
+      if(pid == 0) {
+        if(prev_pipe_read != -1) {
+          dup2(prev_pipe_read,STDIN_FILENO);
+          close(prev_pipe_read);
         }
-      #endif
-    } 
-    else if(program == "type") 
-    {
-      for(auto &arg: args){
-        if(checkBuiltin(arg))
-        {
-          std::cout << arg << " is a shell builtin\n";
-        }
-        else
-        {
-          bool found = false;
 
-          for(auto dir: directories){
-            fs::path filePath = dir / arg;
-            if(isExecutable(filePath.string())){
-              std::cout<< arg << " is " << filePath.make_preferred().string() << '\n';
-              found = true;
-            }
-            if(found) break;
-          }
-
-          if(!found) std:: cout << arg <<": not found\n";
-        } 
-      }
-    } 
-    else if(program == "cd") {
-      for(auto &new_dir: args){
-        new_dir = (new_dir == "~") ? home_env.string() : new_dir;
-        try {
-          fs::current_path(new_dir);
-        } catch (const fs::filesystem_error& e){
-          std::cerr << "cd: " << new_dir << ": " << e.code().message() << '\n';
+        if(!pipeline[i].out_file.empty()) {
+          pipeline[i].prepare_redirection();
+          if(i < num_cmds - 1) close(pipe_fds[1]);
+        } else if (i < num_cmds - 1) {
+          dup2(pipe_fds[1], STDOUT_FILENO);
         }
+
+        if(i< num_cmds - 1) {
+          close(pipe_fds[0]);
+          close(pipe_fds[1]);
+        }
+
+        if(!execute_command(pipeline[i].argv[0], pipeline[i].argv)) {exit(1);}
+        exit(0);
+      } 
+      if (prev_pipe_read != -1) close(prev_pipe_read);
+    
+      if (i < num_cmds - 1) {
+          close(pipe_fds[1]);       // CRITICAL: Close write end so reader gets EOF
+          prev_pipe_read = pipe_fds[0]; // Save read end for next child
       }
     }
-    else 
-    {
-      //handle not builtin command
-      if(!external_command_run(program,args,directories)) std:: cout << program << ": not found\n";
-    }
+    while(wait(NULL)>0); //parents wait for all children
   }
 }
