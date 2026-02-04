@@ -284,7 +284,9 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
       }
     }
   }else if (program == "history"){
-    for(size_t i = 0; i < history.size(); ++i) {
+    int start = 0;
+    if(argv.size() > 2) start = history.size() - std::stoi(argv[1]);
+    for(size_t i = start; i < history.size(); ++i) {
       std::cout << '\t' << i + 1 << ' ';
       for(auto &arg: history[i].args) std::cout << arg << ' ';
       std::cout << '\n';
