@@ -31,6 +31,9 @@ struct Command {
   std::string out_file;
   std::vector<char*> argv;
 
+  int saved_out = -1;
+  int saved_err = -1;
+
   bool should_out_redirect = false;
   bool should_err_redirect = false;
   bool append_redirect = false;
@@ -70,24 +73,37 @@ struct Command {
 
   void prepare_redirection(){
     if((should_out_redirect || append_redirect) && !out_file.empty()){
-      int fd = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(fd == -1) {
+      saved_out = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(saved_out == -1) {
         perror("open");
       }
-      if(dup2(fd, STDOUT_FILENO) == -1){
+      if(dup2(saved_out, STDOUT_FILENO) == -1){
         perror("dup2");
       }
-      close(fd);
+      close(saved_out);
     }
     if((should_err_redirect || err_append_redirect) && !out_file.empty()){
-      int fd = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(fd == -1) {
+      saved_err = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
+      if(saved_err == -1) {
         perror("open");
       }
-      if(dup2(fd, STDERR_FILENO) == -1){
+      if(dup2(saved_err, STDERR_FILENO) == -1){
         perror("dup2");
       }
-      close(fd);
+      close(saved_err);
+    }
+  }
+
+  void disable_redirection(){
+    std::fflush(stdout);
+    std::fflush(stderr);
+    if (saved_out != -1) {
+      dup2(saved_out, STDOUT_FILENO);
+      close(saved_out);
+    }
+    if (saved_err != -1) {
+      dup2(saved_err, STDERR_FILENO);
+      close(saved_err);
     }
   }
 };
@@ -235,7 +251,8 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
   } 
   else if(program == "type") 
   {
-    for(auto &arg: argv){
+    for(size_t i = 1; i < argv.size()-1; ++i){
+      std::string arg = argv[i];
       if(checkBuiltin(arg))
       {
         std::cout << arg << " is a shell builtin\n";
@@ -384,6 +401,16 @@ int main() {
     
     for(size_t i = 0; i < num_cmds ; ++i) {
       pipeline[i].get_argv();
+
+      // If this is a single built-in command (no piping), run it in the parent
+      // so it can modify the shell state (e.g. `cd` changes parent's cwd).
+      if (num_cmds == 1 && !pipeline[i].args.empty() && (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit")) {
+        // if(!pipeline[i].out_file.empty()) pipeline[i].prepare_redirection();
+        bool cont = execute_command(pipeline[i].args[0], pipeline[i].argv);
+        if (!cont) return 0;
+        // if(!pipeline[i].out_file.empty()) pipeline[i].disable_redirection();
+        break; // skip forking for this command; continue REPL
+      }
       
       if(i < (num_cmds - 1)) pipe(pipe_fds);
       pid_t pid = fork();
@@ -405,7 +432,7 @@ int main() {
           close(pipe_fds[1]);
         }
 
-        if(!execute_command(pipeline[i].argv[0], pipeline[i].argv)) {exit(1);}
+        if(!execute_command(pipeline[i].argv[0], pipeline[i].argv)) {exit(1);return 0;}
         exit(0);
       } 
       if (prev_pipe_read != -1) close(prev_pipe_read);
