@@ -9,9 +9,11 @@
 #include <regex>
 #include <fcntl.h>
 #include "trie.h"
-// #include <boost/program_options/parser.hpp>
+
 namespace fs = std::filesystem;
-// using namespace std;
+#define ESC_SEQ 27
+#define UP_CODE 'A'
+#define DOWN_CODE 'B'
 
 #ifdef _WIN32
   #include <windows.h>
@@ -360,8 +362,9 @@ int main() {
   for(auto &custom_exe: custom_executable) {
     Trie::insert(root,custom_exe);
   }
-
+  
   while(true){
+    int counter = history.size();
     std::cout << "$ ";
     std::string input;
 
@@ -390,7 +393,33 @@ int main() {
             prev_char = '\t';
           }
         } 
-      } else {
+      } else if( c == ESC_SEQ ){
+        char next1 = getChar(), next2 = getChar();
+        if(next1 == '[' && next2 == UP_CODE) {
+          if(counter > 0) {
+            counter--;
+            input.clear();
+            std::cout << "\r$ \033[K" << std::flush;
+            for(size_t i = 0; i < history[counter].args.size(); ++i) {
+              input += history[counter].args[i] ;
+              input += ((i != history[counter].args.size()-1) ? " " : "");
+            } 
+            std::cout << input << std::flush;
+          }
+        } else if(next1 == '[' && next2 == DOWN_CODE) {
+          if(counter < history.size() - 1) {
+            counter++;
+            input.clear();
+            std::cout << "\r$ \033[K" << std::flush;
+            for(size_t i = 0; i < history[counter].args.size(); ++i) {
+              input += history[counter].args[i] ;
+              input += ((i != history[counter].args.size()-1) ? " " : "");
+            } 
+            std::cout << input << std::flush;
+          }
+        }
+      }
+      else {
         std::cout << c << std::flush;
         if (c == '\r' || c == '\n')break;
         else input += c;
