@@ -108,7 +108,7 @@ struct Command {
   }
 };
 
-std::vector<std::string> builtins = {"pwd","exit","type","echo","cd"};
+std::vector<std::string> builtins = {"pwd","exit","type","echo","cd","history"};
 std::vector<std::string> custom_executable = {};
 std::vector<fs::path> directories;
 fs::path home_env;
@@ -405,10 +405,8 @@ int main() {
       // If this is a single built-in command (no piping), run it in the parent
       // so it can modify the shell state (e.g. `cd` changes parent's cwd).
       if (num_cmds == 1 && !pipeline[i].args.empty() && (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit")) {
-        // if(!pipeline[i].out_file.empty()) pipeline[i].prepare_redirection();
         bool cont = execute_command(pipeline[i].args[0], pipeline[i].argv);
         if (!cont) return 0;
-        // if(!pipeline[i].out_file.empty()) pipeline[i].disable_redirection();
         break; // skip forking for this command; continue REPL
       }
       
