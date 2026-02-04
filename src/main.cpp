@@ -111,6 +111,7 @@ struct Command {
 std::vector<std::string> builtins = {"pwd","exit","type","echo","cd","history"};
 std::vector<std::string> custom_executable = {};
 std::vector<fs::path> directories;
+std::vector<Command> history;
 fs::path home_env;
 
 bool isExecutable(const std::string& path){
@@ -282,8 +283,13 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
         std::cerr << "cd: " << new_dir << ": " << e.code().message() << '\n';
       }
     }
-  }
-  else 
+  }else if (program == "history"){
+    for(size_t i = 0; i < history.size(); ++i) {
+      std::cout << '\t' << i + 1 << ' ';
+      for(auto &arg: history[i].args) std::cout << arg << ' ';
+      std::cout << '\n';
+    }
+  } else 
   {
     //handle not builtin command
     if(!external_command_run(program,argv)) std:: cout << program << ": not found\n";
@@ -401,7 +407,7 @@ int main() {
     
     for(size_t i = 0; i < num_cmds ; ++i) {
       pipeline[i].get_argv();
-
+      history.push_back(pipeline[i]);
       // If this is a single built-in command (no piping), run it in the parent
       // so it can modify the shell state (e.g. `cd` changes parent's cwd).
       if (num_cmds == 1 && !pipeline[i].args.empty() && (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit")) {
