@@ -323,6 +323,7 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
     }
   } else if (program == "history"){
     // Support reading history from file using: history -r <file>
+    static int append_pointer = 0;
     if (argv.size() > 3) {
       if (std::string(argv[1]) == "-r" && argv[2]) {
         std::string file_loc = argv[2];
@@ -347,14 +348,25 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
         } else {
           std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
         }
-      } else if((std::string(argv[1]) == "-w" || std::string(argv[1]) == "-a") && argv[2]) {
+      } else if(std::string(argv[1]) == "-w" && argv[2]) {
         std::string file_loc = argv[2];
-        const std::ios_base::openmode method = (std::string(argv[1]) == "-a") ? std::ios::app : std::ios::out;
-        std::fstream fd(file_loc, method);
+        std::ofstream fd(file_loc);
         if(fd.is_open()) {
           for(auto &cmd: history){
             for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
           }
+          fd.close();
+        } else {
+          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+        }
+      } else if(std::string(argv[1]) == "-a" && argv[2]) {
+        std::string file_loc = argv[2];
+        std::ofstream fd(file_loc, std::ios::app);
+        if(fd.is_open()) {
+          for(append_pointer; append_pointer < history.size(); ++append_pointer){
+            for(size_t i = 0; i < history[append_pointer].args.size() ; ++i) fd << history[append_pointer].args[i] << ((i != history[append_pointer].args.size()-1)?" ":"\n");
+          }
+          // std::cout<<append_pointer << std::endl;
           fd.close();
         } else {
           std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
@@ -524,7 +536,7 @@ int main() {
       if (num_cmds == 1 && !pipeline[i].args.empty()) {
         if (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit") {
           is_parent_command = true;
-        } else if (pipeline[i].args[0] == "history" && pipeline[i].args.size() > 1 && (pipeline[i].args[1] == "-r" || pipeline[i].args[1] == "-w")) {
+        } else if (pipeline[i].args[0] == "history" && pipeline[i].args.size() > 1 && (pipeline[i].args[1] == "-r" || pipeline[i].args[1] == "-w" || pipeline[i].args[1] == "-a")) {
           is_parent_command = true;
         }
       }
