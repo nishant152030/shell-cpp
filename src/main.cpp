@@ -347,9 +347,10 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
         } else {
           std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
         }
-      } else if(std::string(argv[1]) == "-w" && argv[2]) {
+      } else if((std::string(argv[1]) == "-w" || std::string(argv[1]) == "-a") && argv[2]) {
         std::string file_loc = argv[2];
-        std::ofstream fd(file_loc);
+        const std::ios_base::openmode method = (std::string(argv[1]) == "-a") ? std::ios::app : std::ios::out;
+        std::fstream fd(file_loc, method);
         if(fd.is_open()) {
           for(auto &cmd: history){
             for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
