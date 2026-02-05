@@ -151,6 +151,9 @@ std::vector<std::string> custom_executable = {};
 std::vector<fs::path> directories;
 std::vector<Command> history;
 fs::path home_env;
+const char* raw_env = std::getenv("PATH");
+const char* raw_home_env = std::getenv("HOME");
+const char* raw_history_env = std::getenv("HISTFILE");
 
 bool isExecutable(const std::string& path){
   if(!fs::exists(path) || !fs::is_regular_file(path)) return false;
@@ -274,8 +277,57 @@ bool external_command_run(const std::string &program, std::vector<char*> &argv){
   return false;
 }
 
+void read_history(const std::string &file_loc) {
+  std::ifstream fd(file_loc);
+  if(fd.is_open()) {
+    std::string cmds;
+    while (std::getline(fd, cmds)) {
+      if(cmds.empty()) continue;  // Skip empty lines
+      Command cmd;
+      std::stringstream ss(cmds);
+      std::string arg;
+      while(ss >> arg) {
+        cmd.args.push_back(arg);
+      }
+      history.push_back(cmd);
+      history.back().get_argv();
+    }
+    fd.close();
+  } else {
+    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+  }
+}
+
+void write_history(const std::string &file_loc) {
+  std::ofstream fd(file_loc);
+  if(fd.is_open()) {
+    for(auto &cmd: history){
+      for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
+    }
+    fd.close();
+  } else {
+    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+  }
+}
+
+void append_history(const std::string &file_loc, int append_pointer) {
+  std::ofstream fd(file_loc, std::ios::app);
+  if(fd.is_open()) {
+    for(append_pointer; append_pointer < history.size(); ++append_pointer){
+      for(size_t i = 0; i < history[append_pointer].args.size() ; ++i) fd << history[append_pointer].args[i] << ((i != history[append_pointer].args.size()-1)?" ":"\n");
+    }
+    // std::cout<<append_pointer << std::endl;
+    fd.close();
+  } else {
+    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+  }
+}
+
 bool execute_command(const std::string &program, std::vector<char*> &argv) {
-  if (program == "exit") return false;
+  if (program == "exit") {
+    if(raw_history_env != NULL)write_history(raw_history_env);
+    return false;
+  }
   if(program == "pwd")
   {
     fs::path cwd = fs::current_path();
@@ -327,50 +379,14 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
     if (argv.size() > 3) {
       if (std::string(argv[1]) == "-r" && argv[2]) {
         std::string file_loc = argv[2];
-        std::ifstream fd(file_loc);
-        if(fd.is_open()) {
-          std::string cmds;
-          while (std::getline(fd, cmds)) {
-            if(cmds.empty()) continue;  // Skip empty lines
-            Command cmd;
-            std::stringstream ss(cmds);
-            std::string arg;
-            while(ss >> arg) {
-              // std::cout << arg << " ";
-              cmd.args.push_back(arg);
-            }
-            // std::cout << '\n';
-            history.push_back(cmd);
-            history.back().get_argv();
-            // std::cout << history.size() << '\n';
-          }
-          fd.close();
-        } else {
-          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-        }
+        read_history(file_loc);
       } else if(std::string(argv[1]) == "-w" && argv[2]) {
         std::string file_loc = argv[2];
-        std::ofstream fd(file_loc);
-        if(fd.is_open()) {
-          for(auto &cmd: history){
-            for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
-          }
-          fd.close();
-        } else {
-          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-        }
+        write_history(file_loc);
       } else if(std::string(argv[1]) == "-a" && argv[2]) {
         std::string file_loc = argv[2];
-        std::ofstream fd(file_loc, std::ios::app);
-        if(fd.is_open()) {
-          for(append_pointer; append_pointer < history.size(); ++append_pointer){
-            for(size_t i = 0; i < history[append_pointer].args.size() ; ++i) fd << history[append_pointer].args[i] << ((i != history[append_pointer].args.size()-1)?" ":"\n");
-          }
-          // std::cout<<append_pointer << std::endl;
-          fd.close();
-        } else {
-          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-        }
+        append_history(file_loc, append_pointer);
+        append_pointer = history.size();
       } else {
         std::cerr << "history: -r requires a filename" << std::endl;
       }
@@ -428,25 +444,7 @@ int main() {
   home_env = raw_home_env;
   
   if(raw_history_env != NULL) {
-    std::string history_env(raw_history_env);
-    std::ifstream fd(history_env);
-    if(fd.is_open()) {
-      std::string cmds;
-      while (std::getline(fd, cmds)) {
-        if(cmds.empty()) continue;  // Skip empty lines
-        Command cmd;
-        std::stringstream ss(cmds);
-        std::string arg;
-        while(ss >> arg) {
-          cmd.args.push_back(arg);
-        }
-        history.push_back(cmd);
-        history.back().get_argv();
-      }
-      fd.close();
-    } else {
-      std::cerr << "history: cannot open file '" << history_env << "'" << std::endl;
-    }
+    read_history(raw_history_env);
   }
 
   std::stringstream ss(path_env);
