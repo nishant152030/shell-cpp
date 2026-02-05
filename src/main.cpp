@@ -324,7 +324,7 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
   } else if (program == "history"){
     // Support reading history from file using: history -r <file>
     if (argv.size() > 3) {
-      if (argv[1] == "-r" && argv[2]) {
+      if (std::string(argv[1]) == "-r" && argv[2]) {
         std::string file_loc = argv[2];
         std::ifstream fd(file_loc);
         if(fd.is_open()) {
@@ -347,13 +347,12 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
         } else {
           std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
         }
-      } else if(argv[1] == "-w" && argv[2]) {
+      } else if(std::string(argv[1]) == "-w" && argv[2]) {
         std::string file_loc = argv[2];
         std::ofstream fd(file_loc);
         if(fd.is_open()) {
           for(auto &cmd: history){
-            for(auto &arg: cmd.args) fd << arg << ' ';
-            fd << '\n';
+            for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
           }
           fd.close();
         } else {
