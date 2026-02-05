@@ -323,8 +323,8 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
     }
   } else if (program == "history"){
     // Support reading history from file using: history -r <file>
-    if (argv.size() > 2 && argv[1] && std::string(argv[1]) == "-r") {
-      if (argv.size() > 2 && argv[2]) {
+    if (argv.size() > 3) {
+      if (argv[1] == "-r" && argv[2]) {
         std::string file_loc = argv[2];
         std::ifstream fd(file_loc);
         if(fd.is_open()) {
@@ -342,6 +342,18 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
             history.push_back(cmd);
             history.back().get_argv();
             // std::cout << history.size() << '\n';
+          }
+          fd.close();
+        } else {
+          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+        }
+      } else if(argv[1] == "-w" && argv[2]) {
+        std::string file_loc = argv[2];
+        std::ofstream fd(file_loc);
+        if(fd.is_open()) {
+          for(auto &cmd: history){
+            for(auto &arg: cmd.args) fd << arg << ' ';
+            fd << '\n';
           }
           fd.close();
         } else {
@@ -512,7 +524,7 @@ int main() {
       if (num_cmds == 1 && !pipeline[i].args.empty()) {
         if (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit") {
           is_parent_command = true;
-        } else if (pipeline[i].args[0] == "history" && pipeline[i].args.size() > 1 && pipeline[i].args[1] == "-r") {
+        } else if (pipeline[i].args[0] == "history" && pipeline[i].args.size() > 1 && (pipeline[i].args[1] == "-r" || pipeline[i].args[1] == "-w")) {
           is_parent_command = true;
         }
       }
