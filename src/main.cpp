@@ -421,10 +421,33 @@ int main() {
   // TODO: Uncomment the code below to pass the first stage
   
   const char* raw_env = std::getenv("PATH");
-  char* raw_home_env = std::getenv("HOME");
-  
+  const char* raw_home_env = std::getenv("HOME");
+  const char* raw_history_env = std::getenv("HISTFILE");
+
   std::string path_env(raw_env);
   home_env = raw_home_env;
+  
+  if(raw_history_env != NULL) {
+    std::string history_env(raw_history_env);
+    std::ifstream fd(history_env);
+    if(fd.is_open()) {
+      std::string cmds;
+      while (std::getline(fd, cmds)) {
+        if(cmds.empty()) continue;  // Skip empty lines
+        Command cmd;
+        std::stringstream ss(cmds);
+        std::string arg;
+        while(ss >> arg) {
+          cmd.args.push_back(arg);
+        }
+        history.push_back(cmd);
+        history.back().get_argv();
+      }
+      fd.close();
+    } else {
+      std::cerr << "history: cannot open file '" << history_env << "'" << std::endl;
+    }
+  }
 
   std::stringstream ss(path_env);
   std::string item;
