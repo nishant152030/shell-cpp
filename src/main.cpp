@@ -41,7 +41,43 @@ struct Command {
   bool append_redirect = false;
   bool err_append_redirect = false;
   
+  Command() = default;
+
+    // 2. Custom Copy Constructor
+    Command(const Command& other) {
+        // Copy all the standard data
+        this->args = other.args;
+        this->out_file = other.out_file;
+        this->saved_out = other.saved_out;
+        this->saved_err = other.saved_err;
+        this->should_out_redirect = other.should_out_redirect;
+        this->should_err_redirect = other.should_err_redirect;
+        this->append_redirect = other.append_redirect;
+        this->err_append_redirect = other.err_append_redirect;
+
+        // REBUILD the pointers to point to OUR args, not 'other's args
+        this->get_argv(); 
+    }
+
+    // 3. Custom Copy Assignment Operator (for cmd1 = cmd2)
+    Command& operator=(const Command& other) {
+        if (this != &other) {
+            this->args = other.args;
+            this->out_file = other.out_file;
+            this->saved_out = other.saved_out;
+            this->saved_err = other.saved_err;
+            this->should_out_redirect = other.should_out_redirect;
+            this->should_err_redirect = other.should_err_redirect;
+            this->append_redirect = other.append_redirect;
+            this->err_append_redirect = other.err_append_redirect;
+
+            this->get_argv(); // Rebuild pointers
+        }
+        return *this;
+    }
+
   void get_argv() {
+    argv.clear();
     for(size_t i = 0; i < args.size(); ++i) {
       if (args[i] == ">" || args[i] == "1>") {
         should_out_redirect = true;
@@ -285,7 +321,38 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
         std::cerr << "cd: " << new_dir << ": " << e.code().message() << '\n';
       }
     }
-  }else if (program == "history"){
+  } else if (program == "history"){
+    // Support reading history from file using: history -r <file>
+    if (argv.size() > 2 && argv[1] && std::string(argv[1]) == "-r") {
+      if (argv.size() > 2 && argv[2]) {
+        std::string file_loc = argv[2];
+        std::ifstream fd(file_loc);
+        if(fd.is_open()) {
+          std::string cmds;
+          while (std::getline(fd, cmds)) {
+            if(cmds.empty()) continue;  // Skip empty lines
+            Command cmd;
+            std::stringstream ss(cmds);
+            std::string arg;
+            while(ss >> arg) {
+              // std::cout << arg << " ";
+              cmd.args.push_back(arg);
+            }
+            // std::cout << '\n';
+            history.push_back(cmd);
+            history.back().get_argv();
+            // std::cout << history.size() << '\n';
+          }
+          fd.close();
+        } else {
+          std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
+        }
+      } else {
+        std::cerr << "history: -r requires a filename" << std::endl;
+      }
+      return true;
+    }
+
     int start = 0;
     if(argv.size() > 2) start = history.size() - std::stoi(argv[1]);
     for(size_t i = start; i < history.size(); ++i) {
@@ -440,8 +507,17 @@ int main() {
       pipeline[i].get_argv();
       history.push_back(pipeline[i]);
       // If this is a single built-in command (no piping), run it in the parent
-      // so it can modify the shell state (e.g. `cd` changes parent's cwd).
-      if (num_cmds == 1 && !pipeline[i].args.empty() && (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit")) {
+      // so it can modify the shell state (e.g. `cd` changes parent's cwd, or `history -r` loads history).
+      bool is_parent_command = false;
+      if (num_cmds == 1 && !pipeline[i].args.empty()) {
+        if (pipeline[i].args[0] == "cd" || pipeline[i].args[0] == "exit") {
+          is_parent_command = true;
+        } else if (pipeline[i].args[0] == "history" && pipeline[i].args.size() > 1 && pipeline[i].args[1] == "-r") {
+          is_parent_command = true;
+        }
+      }
+      
+      if (is_parent_command) {
         bool cont = execute_command(pipeline[i].args[0], pipeline[i].argv);
         if (!cont) return 0;
         break; // skip forking for this command; continue REPL
