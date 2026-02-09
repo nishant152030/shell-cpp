@@ -9,6 +9,8 @@
 #include <regex>
 #include <fcntl.h>
 #include "trie.h"
+#include "command.h"
+#include "history.h"
 
 namespace fs = std::filesystem;
 #define ESC_SEQ 27
@@ -28,129 +30,12 @@ namespace fs = std::filesystem;
   const char PATH_SEP = ':';
 #endif
 
-struct Command {
-  std::vector<std::string> args;
-  std::string out_file;
-  std::vector<char*> argv;
-
-  int saved_out = -1;
-  int saved_err = -1;
-
-  bool should_out_redirect = false;
-  bool should_err_redirect = false;
-  bool append_redirect = false;
-  bool err_append_redirect = false;
-  
-  Command() = default;
-
-    // 2. Custom Copy Constructor
-    Command(const Command& other) {
-        // Copy all the standard data
-        this->args = other.args;
-        this->out_file = other.out_file;
-        this->saved_out = other.saved_out;
-        this->saved_err = other.saved_err;
-        this->should_out_redirect = other.should_out_redirect;
-        this->should_err_redirect = other.should_err_redirect;
-        this->append_redirect = other.append_redirect;
-        this->err_append_redirect = other.err_append_redirect;
-
-        // REBUILD the pointers to point to OUR args, not 'other's args
-        this->get_argv(); 
-    }
-
-    // 3. Custom Copy Assignment Operator (for cmd1 = cmd2)
-    Command& operator=(const Command& other) {
-        if (this != &other) {
-            this->args = other.args;
-            this->out_file = other.out_file;
-            this->saved_out = other.saved_out;
-            this->saved_err = other.saved_err;
-            this->should_out_redirect = other.should_out_redirect;
-            this->should_err_redirect = other.should_err_redirect;
-            this->append_redirect = other.append_redirect;
-            this->err_append_redirect = other.err_append_redirect;
-
-            this->get_argv(); // Rebuild pointers
-        }
-        return *this;
-    }
-
-  void get_argv() {
-    argv.clear();
-    for(size_t i = 0; i < args.size(); ++i) {
-      if (args[i] == ">" || args[i] == "1>") {
-        should_out_redirect = true;
-        if (i + 1 < args.size()) {
-            out_file = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == ">>" || args[i] == "1>>") {
-        append_redirect = true;
-        if (i + 1 < args.size()) {
-            out_file = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == "2>") {
-        should_err_redirect = true;
-        if (i + 1 < args.size()) {
-            out_file = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      } else if (args[i] == "2>>") {
-        err_append_redirect = true;
-        if (i + 1 < args.size()) {
-            out_file = args[i + 1]; // Get file following the operator
-        }
-        break; // Stop adding to argv once redirection starts
-      }
-      argv.push_back(const_cast<char*>(args[i].c_str()));
-    }
-    argv.push_back(nullptr);
-  }
-
-  void prepare_redirection(){
-    if((should_out_redirect || append_redirect) && !out_file.empty()){
-      saved_out = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_out_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(saved_out == -1) {
-        perror("open");
-      }
-      if(dup2(saved_out, STDOUT_FILENO) == -1){
-        perror("dup2");
-      }
-      close(saved_out);
-    }
-    if((should_err_redirect || err_append_redirect) && !out_file.empty()){
-      saved_err = open(out_file.c_str(), O_WRONLY | O_CREAT | ((should_err_redirect) ? O_TRUNC : O_APPEND), 0644);
-      if(saved_err == -1) {
-        perror("open");
-      }
-      if(dup2(saved_err, STDERR_FILENO) == -1){
-        perror("dup2");
-      }
-      close(saved_err);
-    }
-  }
-
-  void disable_redirection(){
-    std::fflush(stdout);
-    std::fflush(stderr);
-    if (saved_out != -1) {
-      dup2(saved_out, STDOUT_FILENO);
-      close(saved_out);
-    }
-    if (saved_err != -1) {
-      dup2(saved_err, STDERR_FILENO);
-      close(saved_err);
-    }
-  }
-};
-
 std::vector<std::string> builtins = {"pwd","exit","type","echo","cd","history"};
 std::vector<std::string> custom_executable = {};
 std::vector<fs::path> directories;
 std::vector<Command> history;
 fs::path home_env;
+
 const char* raw_env = std::getenv("PATH");
 const char* raw_home_env = std::getenv("HOME");
 const char* raw_history_env = std::getenv("HISTFILE");
@@ -277,55 +162,10 @@ bool external_command_run(const std::string &program, std::vector<char*> &argv){
   return false;
 }
 
-void read_history(const std::string &file_loc) {
-  std::ifstream fd(file_loc);
-  if(fd.is_open()) {
-    std::string cmds;
-    while (std::getline(fd, cmds)) {
-      if(cmds.empty()) continue;  // Skip empty lines
-      Command cmd;
-      std::stringstream ss(cmds);
-      std::string arg;
-      while(ss >> arg) {
-        cmd.args.push_back(arg);
-      }
-      history.push_back(cmd);
-      history.back().get_argv();
-    }
-    fd.close();
-  } else {
-    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-  }
-}
-
-void write_history(const std::string &file_loc) {
-  std::ofstream fd(file_loc);
-  if(fd.is_open()) {
-    for(auto &cmd: history){
-      for(size_t i = 0; i < cmd.args.size() ; ++i) fd << cmd.args[i] << ((i != cmd.args.size()-1)?" ":"\n");
-    }
-    fd.close();
-  } else {
-    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-  }
-}
-
-void append_history(const std::string &file_loc, int append_pointer) {
-  std::ofstream fd(file_loc, std::ios::app);
-  if(fd.is_open()) {
-    for(append_pointer; append_pointer < history.size(); ++append_pointer){
-      for(size_t i = 0; i < history[append_pointer].args.size() ; ++i) fd << history[append_pointer].args[i] << ((i != history[append_pointer].args.size()-1)?" ":"\n");
-    }
-    // std::cout<<append_pointer << std::endl;
-    fd.close();
-  } else {
-    std::cerr << "history: cannot open file '" << file_loc << "'" << std::endl;
-  }
-}
 
 bool execute_command(const std::string &program, std::vector<char*> &argv) {
   if (program == "exit") {
-    if(raw_history_env != NULL)write_history(raw_history_env);
+    if(raw_history_env != NULL) HISTORY::write_history(raw_history_env, history);
     return false;
   }
   if(program == "pwd")
@@ -379,13 +219,13 @@ bool execute_command(const std::string &program, std::vector<char*> &argv) {
     if (argv.size() > 3) {
       if (std::string(argv[1]) == "-r" && argv[2]) {
         std::string file_loc = argv[2];
-        read_history(file_loc);
+        HISTORY::read_history(file_loc, history);
       } else if(std::string(argv[1]) == "-w" && argv[2]) {
         std::string file_loc = argv[2];
-        write_history(file_loc);
+        HISTORY::write_history(file_loc, history);
       } else if(std::string(argv[1]) == "-a" && argv[2]) {
         std::string file_loc = argv[2];
-        append_history(file_loc, append_pointer);
+        HISTORY::append_history(file_loc, append_pointer, history);
         append_pointer = history.size();
       } else {
         std::cerr << "history: -r requires a filename" << std::endl;
@@ -430,21 +270,14 @@ char getChar() {
 }
 
 int main() {
-  // Flush after every std::cout / std:cerr
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
-
-  // TODO: Uncomment the code below to pass the first stage
-  
-  const char* raw_env = std::getenv("PATH");
-  const char* raw_home_env = std::getenv("HOME");
-  const char* raw_history_env = std::getenv("HISTFILE");
 
   std::string path_env(raw_env);
   home_env = raw_home_env;
   
   if(raw_history_env != NULL) {
-    read_history(raw_history_env);
+    HISTORY::read_history(raw_history_env, history);
   }
 
   std::stringstream ss(path_env);
@@ -463,7 +296,7 @@ int main() {
         }
       }
     } catch (const fs::filesystem_error &e){
-      std::cerr << "Error: " << e.what() << std::endl;
+      std::cerr << "Error: " << e.what() << std::flush;
     }
   }
   // Make builtin Trie for auto complete
